@@ -11,7 +11,7 @@ Built with **Qt 6** and **C++23**.
 > Panels tuck away to the screen edge and slide in on hover, leaving your
 > desktop uncluttered until you need them.
 
-<video src="https://github.com/NLG-code/Sleeker/raw/main/demo/Sliders.mp4" controls width="720"></video>
+![Sleeker demo](demo/Sliders.gif)
 
 ## Features
 
