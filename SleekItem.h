@@ -40,11 +40,20 @@ protected:
     void paintEvent(QPaintEvent *event) override;
     void enterEvent(QEnterEvent *event) override;
     void leaveEvent(QEvent *event) override;
+    QSize sizeHint() const override;
 
 private:
     void setupUi();
     QIcon resolveIcon() const;
     void refreshIcon();
+    void updateLabel();        // re-elide / re-wrap text for current font & width
+#ifdef Q_OS_WIN
+    bool startNativeFileDrag(); // drag the file's real shell IDataObject
+#endif
+
+    // Set for the duration of an in-process drag so panels/items can recognise
+    // our own drag (the native shell drag carries no Qt source or custom MIME).
+    static SleekItem *s_dragSource;
 
     QString m_filePath;
     QLabel *m_iconLabel = nullptr;
@@ -52,8 +61,8 @@ private:
     QPoint  m_dragStartPos;
     bool    m_hovered = false;
 
-    int m_iconSize  = 38;
-    int m_itemWidth = 64;
+    int m_iconSize  = 96;
+    int m_itemWidth = 120;
 };
 
 #endif // SLEEKITEM_H

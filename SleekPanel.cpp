@@ -182,7 +182,7 @@ void SleekPanel::setupUi()
 
         // --- Icon size slider ---
         auto *iconSlider = new QSlider(Qt::Horizontal, dlg);
-        iconSlider->setRange(24, 72);
+        iconSlider->setRange(24, 256);
         iconSlider->setValue(m_iconSize);
         auto *iconLabel = new QLabel(QString::number(m_iconSize) + " px", dlg);
         auto *iconRow   = new QHBoxLayout();
@@ -319,7 +319,7 @@ void SleekPanel::setOpacity(int alpha)
 
 void SleekPanel::setIconScale(int size)
 {
-    m_iconSize = qBound(24, size, 72);
+    m_iconSize = qBound(24, size, 256);
     for (auto *item : m_items)
         item->setIconSize(m_iconSize);
     m_contentWidget->updateGeometry();
@@ -608,59 +608,103 @@ void SleekPanel::slideOut()
     m_slideAnim->start();
 }
 
+bool SleekPanel::cursorOverThisPanel() const
+{
+    const QPoint g = QCursor::pos();
+    if (!rect().contains(mapFromGlobal(g)))
+        return false;
+    // Geometry alone isn't enough: a sibling panel docked to a perpendicular
+    // edge can sit on top of part of us. Confirm we're the widget actually
+    // under the cursor so we don't stay pinned open beneath it.
+    QWidget *hit = QApplication::widgetAt(g);
+    return hit && (hit == this || isAncestorOf(hit));
+}
+
+bool SleekPanel::cursorAtDockEdge() const
+{
+    QScreen *screen = panelScreen();
+    if (!screen) return false;
+    const QRect sg = screen->geometry();
+    const QPoint cur = QCursor::pos();
+
+    // The trigger zone is a thin strip straddling the docked edge. It reaches
+    // EDGE_HOTZONE inward (onto this panel's screen) and only EDGE_SEAM past the
+    // edge. The small outward reach is what keeps the right edge responsive:
+    // where a neighbouring monitor abuts the edge the cursor doesn't clamp, it
+    // sails across, so it settles a few px onto the seam rather than inside our
+    // screen — without the seam allowance the poll keeps missing it. The reach
+    // is intentionally tiny so the panel does NOT trigger from deeper in the
+    // other monitor. The perpendicular axis stays bounded to this screen's span.
+    switch (m_dockSide) {
+    case DockSide::Left:
+        return (cur.x() <= sg.left() + EDGE_HOTZONE && cur.x() >= sg.left() - EDGE_SEAM)
+            && (cur.y() >= sg.top() && cur.y() <= sg.bottom());
+    case DockSide::Right:
+        return (cur.x() >= sg.right() - EDGE_HOTZONE && cur.x() <= sg.right() + EDGE_SEAM)
+            && (cur.y() >= sg.top() && cur.y() <= sg.bottom());
+    case DockSide::Top:
+        return (cur.y() <= sg.top() + EDGE_HOTZONE && cur.y() >= sg.top() - EDGE_SEAM)
+            && (cur.x() >= sg.left() && cur.x() <= sg.right());
+    case DockSide::Bottom:
+        return (cur.y() >= sg.bottom() - EDGE_HOTZONE && cur.y() <= sg.bottom() + EDGE_SEAM)
+            && (cur.x() >= sg.left() && cur.x() <= sg.right());
+    default:
+        return false;
+    }
+}
+
 void SleekPanel::checkEdgeProximity()
 {
     if (m_dockSide == DockSide::None)
         return;
 
-    QScreen *screen = panelScreen();
-    if (!screen) return;
-    const QRect sg = screen->geometry();
-    const QPoint cur = QCursor::pos();
+    const bool atEdge = cursorAtDockEdge();
 
-    // Only react if the cursor is actually on this panel's screen.
-    // Without this, moving the cursor on an adjacent monitor can falsely
-    // satisfy the single-axis edge check (e.g. x >= right-edge of monitor 1
-    // while cursor is on monitor 2).
-    if (!sg.contains(cur))
-        return;
-
-    bool atEdge = false;
-    switch (m_dockSide) {
-    case DockSide::Left:
-        atEdge = (cur.x() <= sg.left() + EDGE_HOTZONE);
-        break;
-    case DockSide::Right:
-        atEdge = (cur.x() >= sg.right() - EDGE_HOTZONE);
-        break;
-    case DockSide::Top:
-        atEdge = (cur.y() <= sg.top() + EDGE_HOTZONE);
-        break;
-    case DockSide::Bottom:
-        atEdge = (cur.y() >= sg.bottom() - EDGE_HOTZONE);
-        break;
-    default:
-        break;
-    }
-
-    if (!m_dockExpanded && atEdge) {
-#ifdef Q_OS_WIN
-        // Only use poll-based trigger when a foreign window (e.g. Chrome on
-        // an adjacent monitor) covers the sliver and blocks enterEvent.
-        POINT pt = { cur.x(), cur.y() };
-        HWND  hit = WindowFromPoint(pt);
-        if (hit) {
-            DWORD hitPid = 0;
-            GetWindowThreadProcessId(hit, &hitPid);
-            if (hitPid == GetCurrentProcessId())
-                return;   // our own window — enterEvent will handle it
+    if (!m_dockExpanded) {
+        if (atEdge) {
+            // Remember we're at the edge so brief dropouts don't reset the
+            // pending open below.
+            m_edgeSeen.restart();
+            if (m_dockSide == DockSide::Right) {
+                // The right edge is shared with the monitors to the right, so
+                // the cursor never clamps there to "hold" a hover delay the way
+                // the clamping left/top/bottom edges do. Open it instantly.
+                if (m_expandDelay) m_expandDelay->stop();
+                slideIn();
+            } else if (m_expandDelay) {
+                // enterEvent is the preferred trigger because it honours the
+                // configured hover delay, but it can't be relied on everywhere
+                // (e.g. the sliver sitting behind desktop icons). Drive the same
+                // timer from the poll so it still opens; the !isActive() guard
+                // keeps enterEvent and the poll from double-triggering, and keeps
+                // the timer running across flicker instead of restarting it.
+                if (!m_expandDelay->isActive())
+                    m_expandDelay->start();
+            } else {
+                slideIn();
+            }
+        } else if (m_expandDelay && m_expandDelay->isActive()
+                   && (!m_edgeSeen.isValid() || m_edgeSeen.elapsed() > EDGE_GRACE_MS)) {
+            // Only cancel the pending open once the cursor has been away from
+            // the edge for EDGE_GRACE_MS. On an edge shared with another monitor
+            // the cursor doesn't clamp — it constantly skips a pixel or two onto
+            // the neighbour and back — so cancelling on the first !atEdge poll
+            // would keep resetting the timer and make the panel take seconds to
+            // open. The grace lets the hover delay accumulate through that
+            // jitter, matching how the left/top edges (which clamp) behave.
+            m_expandDelay->stop();
         }
-#endif
-        if (m_expandDelay && !m_expandDelay->isActive())
-            m_expandDelay->start();
-    } else if (m_dockExpanded && !atEdge) {
-        // Cursor left the edge — slide out if also not hovering the panel itself
-        if (!rect().contains(mapFromGlobal(cur))) {
+    } else {
+        // Slide out once the cursor has left BOTH the panel itself and the edge
+        // trigger zone. The !atEdge gate is essential on multi-monitor setups:
+        // a monitor sitting beyond the docked edge shares that edge's coordinate
+        // range, so without it the panel would slide out the moment the cursor
+        // isn't over the panel and immediately re-trigger because it's still
+        // "at the edge" — an open/close flicker loop across the whole second
+        // monitor. cursorOverThisPanel() is a real hit test (not just geometry),
+        // so the panel still slides out when an overlapping sibling — e.g. a
+        // top-docked panel over our top region — is what the cursor is on.
+        if (!atEdge && !cursorOverThisPanel()) {
             const qint64 remaining = 500 - m_slideInTime.elapsed();
             if (remaining <= 0) {
                 slideOut();
@@ -669,7 +713,7 @@ void SleekPanel::checkEdgeProximity()
                     m_slideOutDelay = new QTimer(this);
                     m_slideOutDelay->setSingleShot(true);
                     connect(m_slideOutDelay, &QTimer::timeout, this, [this]{
-                        if (m_dockExpanded && !rect().contains(mapFromGlobal(QCursor::pos())))
+                        if (m_dockExpanded && !cursorAtDockEdge() && !cursorOverThisPanel())
                             slideOut();
                     });
                 }
@@ -695,16 +739,12 @@ void SleekPanel::leaveEvent(QEvent *event)
     if (m_dockSide != DockSide::None) {
         // On Windows, WM_MOUSELEAVE fires when the cursor moves onto a child
         // widget's HWND, even though we're still within the panel's bounding box.
-        // Guard: only suppress if the widget under the cursor is actually part
-        // of this panel. A plain rect().contains() check is wrong for docked
-        // panels that span the full screen edge — the cursor can be within
-        // bounds but over a sibling panel that sits on top, so we must
-        // also verify the hit-tested widget is us or one of our children.
-        if (rect().contains(mapFromGlobal(QCursor::pos()))) {
-            QWidget *hit = QApplication::widgetAt(QCursor::pos());
-            if (hit && (hit == this || isAncestorOf(hit)))
-                return;
-        }
+        // Guard: only suppress if the cursor is genuinely over this panel. A
+        // plain rect().contains() check is wrong for docked panels that span
+        // the full screen edge — the cursor can be within bounds but over a
+        // sibling panel that sits on top.
+        if (cursorOverThisPanel())
+            return;
 
         if (m_expandDelay) m_expandDelay->stop();
         if (m_dockExpanded) {
@@ -716,7 +756,7 @@ void SleekPanel::leaveEvent(QEvent *event)
                     m_slideOutDelay = new QTimer(this);
                     m_slideOutDelay->setSingleShot(true);
                     connect(m_slideOutDelay, &QTimer::timeout, this, [this]{
-                        if (m_dockExpanded && !rect().contains(mapFromGlobal(QCursor::pos())))
+                        if (m_dockExpanded && !cursorOverThisPanel())
                             slideOut();
                     });
                 }
@@ -1098,13 +1138,48 @@ void SleekPanel::relayout()
     m_addBtn     ->setGeometry(addX, bY, BTN_SIZE, BTN_SIZE);
     m_settingsBtn->setGeometry(cfgX, bY, BTN_SIZE, BTN_SIZE);
 
-    m_titleLabel->setGeometry(10, 0, cfgX - 14, TITLE_HEIGHT);
+    // Title-bar content runs from the left edge to just before the buttons.
+    const int titleLeft  = 10;
+    const int titleRight = cfgX - 4;                 // small gap before the gear
+    const int headerW    = qMax(0, titleRight - titleLeft);
 
-    // Position search bar below title bar (if visible)
+    // The search bar shares the title row only when there's room for both a
+    // readable folder name and a usable filter box side by side. Otherwise it
+    // drops onto its own row beneath the title bar so the two never overlap.
+    // Use !isHidden() instead of isVisible() because isVisible() returns false
+    // while the parent widget isn't shown yet (during fromJson loading).
+    constexpr int MIN_TITLE_W  = 48;   // keep the folder name legible inline
+    constexpr int MIN_SEARCH_W = 110;  // keep the filter box usable inline
+    constexpr int INLINE_GAP   = 6;
+
+    const bool wantSearch = m_searchBox && !m_searchBox->isHidden();
+    const bool inlineSearch =
+        wantSearch && headerW >= MIN_TITLE_W + INLINE_GAP + MIN_SEARCH_W;
+
     int contentTop = TITLE_HEIGHT + 2;
-    if (m_searchBox && m_searchBox->isVisible()) {
-        m_searchBox->setGeometry(4, contentTop, width() - 8, SEARCH_HEIGHT);
-        contentTop += SEARCH_HEIGHT + 2;
+
+    if (inlineSearch) {
+        const int sW = qMin(180, headerW - MIN_TITLE_W - INLINE_GAP);
+        const int sX = titleRight - sW;
+        const int sY = (TITLE_HEIGHT - SEARCH_HEIGHT) / 2;
+        m_searchBox->setGeometry(sX, sY, sW, SEARCH_HEIGHT);
+        m_titleLabel->setGeometry(titleLeft, 0,
+                                  qMax(0, sX - INLINE_GAP - titleLeft), TITLE_HEIGHT);
+    } else {
+        m_titleLabel->setGeometry(titleLeft, 0, headerW, TITLE_HEIGHT);
+
+        if (wantSearch) {
+            // Stacked beneath the title — only if there's vertical room for it
+            // plus a minimum content area, else hide it rather than swallow
+            // the whole panel.
+            const int minForSearch = TITLE_HEIGHT + SEARCH_HEIGHT + 4 + MIN_H;
+            if (height() < minForSearch) {
+                m_searchBox->hide();
+            } else {
+                m_searchBox->setGeometry(4, contentTop, width() - 8, SEARCH_HEIGHT);
+                contentTop += SEARCH_HEIGHT + 2;
+            }
+        }
     }
 
     m_scrollArea->setGeometry(4, contentTop, width() - 8, height() - contentTop - 4);

@@ -81,6 +81,16 @@ private:
     void slideOut();
     void checkEdgeProximity();       // poll cursor vs screen edge
 
+    // True only when the cursor is genuinely over this panel — i.e. inside our
+    // rect AND we are the top-most widget at that point. Guards against an
+    // overlapping sibling panel (e.g. one docked to a perpendicular edge)
+    // keeping us pinned open just because the cursor is inside our geometry.
+    bool cursorOverThisPanel() const;
+
+    // True when the global cursor is within EDGE_HOTZONE of this panel's docked
+    // screen edge (and within the edge's span on the other axis).
+    bool cursorAtDockEdge() const;
+
     // Search / filter
     void applyFilter(const QString &text);
 
@@ -104,6 +114,7 @@ private:
     QTimer            *m_expandDelay  = nullptr;   // debounce before sliding in
     QPropertyAnimation *m_slideAnim  = nullptr;
     QElapsedTimer       m_slideInTime;           // when the panel last slid open
+    QElapsedTimer       m_edgeSeen;              // when cursor was last at the dock edge
     QTimer             *m_slideOutDelay = nullptr;
     QTimer             *m_edgePoll     = nullptr;  // cursor-at-edge polling
 
@@ -135,12 +146,18 @@ private:
     static constexpr int SLIVER          = 4;    // fixed px visible when hidden
     static constexpr int SLIVER_RIGHT    = 4;    // strip for right edge
     static constexpr int DEFAULT_TRIGGER = 300;  // default hover delay (ms)
-    static constexpr int EDGE_HOTZONE    = 4;    // px from screen edge to trigger dock
+    static constexpr int EDGE_HOTZONE    = 8;    // px inward from screen edge to trigger dock
+    static constexpr int EDGE_SEAM       = 6;    // px the trigger may reach past the edge
+                                                 // (onto an abutting monitor's seam) so edges
+                                                 // shared with another monitor stay responsive
     static constexpr int SEARCH_HEIGHT   = 22;   // search bar height
+    static constexpr int EDGE_GRACE_MS   = 250;  // tolerate brief edge dropouts (cursor
+                                                 // skipping onto an abutting monitor) before
+                                                 // cancelling a pending slide-in
 
     int m_triggerZone = DEFAULT_TRIGGER;  // hover delay before panel slides in (ms)
-    static constexpr int DEFAULT_FONT  = 10;
-    static constexpr int DEFAULT_ICON  = 38;
+    static constexpr int DEFAULT_FONT  = 9;     // matches Windows desktop (Segoe UI 9pt)
+    static constexpr int DEFAULT_ICON  = 96;
 
     int     m_fontSize   = DEFAULT_FONT;
     int     m_iconSize   = DEFAULT_ICON;

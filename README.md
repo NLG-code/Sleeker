@@ -6,13 +6,25 @@ Built with **Qt 6** and **C++23**.
 
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 
+## Demo
+
+### Clean desktop — panels hidden or docked
+> Panels tuck away to the screen edge, leaving your desktop uncluttered.
+
+![Clean desktop](screenshots/desktop-clean.png)
+
+### Panel slides in on hover
+> Hover the edge to reveal your shortcuts. Here the **Games** panel is docked to the top.
+
+![Panel open](screenshots/panel-open.png)
+
 ## Features
 
 - **Desktop-embedded panels** — panels live on your desktop, behind icons but above the wallpaper
 - **Dock to any edge** — snap panels to the left, right, top, or bottom of any monitor with smooth slide-in/out animations
 - **Multi-monitor support** — panels dock to the correct screen and don't interfere across monitors
 - **Global hotkey** — `Win+`` ` toggles all panels visible/hidden instantly
-- **Per-panel customization** — font, font size, icon size (24–72px), and background opacity per panel
+- **Per-panel customization** — font, font size, icon size (24-72px), and background opacity per panel
 - **Search / filter** — built-in filter bar for panels with many items (auto-shows at 8+ items, or toggle via right-click)
 - **Drag & drop** — drag files into panels from Explorer, or drag items out to apps like Discord
 - **Reorder items** — drag items within a panel to rearrange them
