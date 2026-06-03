@@ -8,15 +8,10 @@ Built with **Qt 6** and **C++23**.
 
 ## Demo
 
-### Clean desktop — panels hidden or docked
-> Panels tuck away to the screen edge, leaving your desktop uncluttered.
+> Panels tuck away to the screen edge and slide in on hover, leaving your
+> desktop uncluttered until you need them.
 
-![Clean desktop](screenshots/desktop-clean.png)
-
-### Panel slides in on hover
-> Hover the edge to reveal your shortcuts. Here the **Games** panel is docked to the top.
-
-![Panel open](screenshots/panel-open.png)
+<video src="https://github.com/NLG-code/Sleeker/raw/main/demo/Sliders.mp4" controls width="720"></video>
 
 ## Features
 
